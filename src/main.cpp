@@ -1,97 +1,145 @@
+#include <Arduino.h>
 #include <WiFi.h>
-#include <HTTPClient.h>
+#include <time.h>
 
-// your Wi-Fi credentials
-const char* ssid     = "NBSJK";
-const char* password = "12345679";
+// Wi-Fi credentials - replace with your network details
+const char* ssid = "NBSJK";      // IMPORTANT: Replace with your actual WiFi name
+const char* password = "12345679"; // IMPORTANT: Replace with your actual WiFi password
 
-// check interval (ms)
-const unsigned long CHECK_INTERVAL = 30UL * 1000UL;
+// NTP Server settings
+const char* ntpServer = "pool.ntp.org";
+const long gmtOffset_sec = 0;      // GMT offset in seconds (0 for GMT, modify for your timezone)
+const int daylightOffset_sec = 3600; // Daylight savings offset (3600 seconds = 1 hour)
 
-unsigned long lastCheck = 0;
+// Variables
+unsigned long lastTimeCheck = 0;
+const long timeCheckInterval = 10000; // Check time every 10 seconds
+bool wifiConnected = false;
 
-// status LEDs
-const int LED_NOT_CONNECTED_PIN = 6;   // turns ON when no internet
-const int LED_CONNECTED_PIN     = 15;  // turns ON when internet is reachable
+// Function declarations
+void connectToWiFi();
+void printLocalTime();
+bool setupNTP();
 
 void setup() {
+  // Initialize Serial for debugging
   Serial.begin(115200);
-  delay(1000);
-  Serial.println();
-  Serial.println("→ Starting Wi-Fi connection…");
-
-  // configure LED pins
-  pinMode(LED_NOT_CONNECTED_PIN, OUTPUT);
-  pinMode(LED_CONNECTED_PIN, OUTPUT);
-  digitalWrite(LED_NOT_CONNECTED_PIN, LOW);
-  digitalWrite(LED_CONNECTED_PIN, LOW);
-
-  // start Wi-Fi
-  WiFi.mode(WIFI_STA);
-  WiFi.begin(ssid, password);
-
-  // wait up to 10 seconds for Wi-Fi
-  unsigned long start = millis();
-  while (WiFi.status() != WL_CONNECTED && millis() - start < 10000) {
-    Serial.print(".");
-    delay(500);
+  delay(1000); // Give time for serial connection to establish
+  
+  Serial.println("\n\n===== ESP32-C3 Firmware Starting =====");
+  Serial.println("Initializing...");
+  
+  // Connect to WiFi
+  connectToWiFi();
+  
+  // Setup NTP time sync
+  if (wifiConnected) {
+    if (setupNTP()) {
+      Serial.println("NTP setup successful");
+      // Get and print the time immediately once
+      printLocalTime();
+    } else {
+      Serial.println("NTP setup failed");
+    }
   }
-  Serial.println();
-
-  // initial status
-  if (WiFi.status() == WL_CONNECTED) {
-    Serial.print("✅ Connected! IP address: ");
-    Serial.println(WiFi.localIP());
-    digitalWrite(LED_CONNECTED_PIN, HIGH);
-    digitalWrite(LED_NOT_CONNECTED_PIN, LOW);
-  } else {
-    Serial.println("❌ Failed to connect to Wi-Fi");
-    digitalWrite(LED_CONNECTED_PIN, LOW);
-    digitalWrite(LED_NOT_CONNECTED_PIN, HIGH);
-  }
-
-  // force first internet check immediately
-  lastCheck = millis() - CHECK_INTERVAL;
-}
-
-bool checkInternet() {
-  if (WiFi.status() != WL_CONNECTED) {
-    Serial.println("⚠️ Wi-Fi not connected");
-    return false;
-  }
-
-  HTTPClient http;
-  http.begin("http://clients3.google.com/generate_204");
-  int code = http.GET();
-  http.end();
-
-  if (code == 204) {
-    return true;
-  } else {
-    Serial.printf("→ HTTP check returned %d\n", code);
-    return false;
-  }
+  
+  Serial.println("Setup complete!");
 }
 
 void loop() {
-  unsigned long now = millis();
-  if (now - lastCheck >= CHECK_INTERVAL) {
-    lastCheck = now;
+  //print on every single loop
 
-    Serial.println();
-    Serial.println("→ Testing Internet connectivity…");
-
-    if (checkInternet()) {
-      Serial.println("✅ Internet is reachable!");
-      digitalWrite(LED_CONNECTED_PIN, HIGH);
-      digitalWrite(LED_NOT_CONNECTED_PIN, LOW);
-    } else {
-      Serial.println("❌ No Internet connectivity.");
-      digitalWrite(LED_CONNECTED_PIN, LOW);
-      digitalWrite(LED_NOT_CONNECTED_PIN, HIGH);
-    }
+  Serial.println("Hey im looping");
+  // Check if WiFi is still connected
+  if (WiFi.status() != WL_CONNECTED && wifiConnected) {
+    Serial.println("WiFi connection lost. Reconnecting...");
+    wifiConnected = false;
+    connectToWiFi();
   }
+  
+  // Check and print time at regular intervals
+  unsigned long currentMillis = millis();
+  if (wifiConnected && (currentMillis - lastTimeCheck >= timeCheckInterval)) {
+    lastTimeCheck = currentMillis;
+    printLocalTime();
+  }
+  printLocalTime();
+  Serial.println("ending the loop, wifiConnected:");
+  Serial.println(wifiConnected);
+  
+}
 
-  // small delay so we don't starve other tasks
-  delay(10);
+void connectToWiFi() {
+  Serial.print("Connecting to WiFi network: ");
+  Serial.println(ssid);
+  
+  WiFi.begin(ssid, password);
+  
+  // Wait for connection with timeout
+  int timeout = 0;
+  while (WiFi.status() != WL_CONNECTED && timeout < 20) {
+    delay(500);
+    Serial.print(".");
+    timeout++;
+  }
+  
+  if (WiFi.status() == WL_CONNECTED) {
+    wifiConnected = true;
+    Serial.println("");
+    Serial.println("WiFi connected successfully!");
+    Serial.print("IP address: ");
+    Serial.println(WiFi.localIP());
+  } else {
+    wifiConnected = false;
+    Serial.println("");
+    Serial.println("WiFi connection failed. Check your credentials or network availability.");
+  }
+}
+
+bool setupNTP() {
+  Serial.println("Setting up NTP time sync...");
+  
+  // Configure NTP time sync
+  configTime(gmtOffset_sec, daylightOffset_sec, ntpServer);
+  
+  // Check if we got the time
+  struct tm timeinfo;
+  if(!getLocalTime(&timeinfo)){
+    Serial.println("Failed to obtain time from NTP server");
+    return false;
+  }
+  
+  return true;
+}
+
+void printLocalTime() {
+  struct tm timeinfo;
+  
+  if(!getLocalTime(&timeinfo)){
+    Serial.println("Failed to obtain current time");
+    return;
+  }
+  
+  // Format and print time details
+  Serial.println("=== Current Time Information ===");
+  Serial.print("Date: ");
+  Serial.print(timeinfo.tm_mday);
+  Serial.print("/");
+  Serial.print(timeinfo.tm_mon + 1); // tm_mon is months since January (0-11)
+  Serial.print("/");
+  Serial.println(1900 + timeinfo.tm_year); // tm_year is years since 1900
+  
+  Serial.print("Time: ");
+  Serial.print(timeinfo.tm_hour);
+  Serial.print(":");
+  if(timeinfo.tm_min < 10) Serial.print("0"); // Add leading zero for single-digit minutes
+  Serial.print(timeinfo.tm_min);
+  Serial.print(":");
+  if(timeinfo.tm_sec < 10) Serial.print("0"); // Add leading zero for single-digit seconds
+  Serial.println(timeinfo.tm_sec);
+  
+  char timeStr[50];
+  strftime(timeStr, sizeof(timeStr), "%A, %B %d %Y %H:%M:%S", &timeinfo);
+  Serial.println(timeStr);
+  Serial.println("===============================");
 }
