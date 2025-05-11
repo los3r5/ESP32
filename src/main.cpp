@@ -13,7 +13,7 @@ const char* ssid = "NBSJK";
 const char* password = "12345679";
 
 // UDP settings
-const char* udpAddress = "192.168.1.100"; // Your computer's IP address
+const char* udpAddress = "192.168.0.181"; // Your computer's IP address
 const int udpPort = 3333;
 WiFiUDP udp;
 
